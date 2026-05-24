@@ -1,5 +1,10 @@
 import { getDownloadUrl } from "../api/client";
 
+const MIME_TYPES: Record<string, string> = {
+  mp4: "video/mp4",
+  webm: "video/webm",
+};
+
 interface Props {
   jobId: string;
   format: string;
@@ -23,11 +28,9 @@ export default function VideoPreview({ jobId, format, onReset }: Props) {
       </div>
 
       {isVideo ? (
-        <video
-          src={url}
-          controls
-          className="w-full rounded-lg max-h-96 bg-black"
-        />
+        <video controls className="w-full rounded-lg max-h-96 bg-black">
+          <source src={url} type={MIME_TYPES[format]} />
+        </video>
       ) : (
         <img src={url} alt="Timelapse GIF" className="w-full rounded-lg" />
       )}

@@ -1,3 +1,5 @@
+import asyncio
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
@@ -10,22 +12,33 @@ UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
 
 
 @router.post("/upload")
 async def upload_video(file: UploadFile = File(...)):
-    suffix = Path(file.filename or "").suffix.lower()
+    safe_name = Path(file.filename or "").name  # strip any directory components
+    suffix = Path(safe_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.filename}")
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix or '(none)'}")
 
-    job_id = create_job("")  # create placeholder first to get id
-
-    dest = UPLOAD_DIR / f"{job_id}{suffix}"
     content = await file.read()
-    dest.write_bytes(content)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large (max {MAX_UPLOAD_BYTES // 1024 // 1024} MB)",
+        )
 
-    # update job with real path
-    from services.job_manager import update_job
-    update_job(job_id, input_path=str(dest))
+    # Generate the ID and write the file BEFORE registering the job so a disk
+    # failure never leaves an orphaned job record with an empty input_path.
+    job_id = str(uuid.uuid4())
+    dest = UPLOAD_DIR / f"{job_id}{suffix}"
 
-    return JSONResponse({"job_id": job_id, "filename": file.filename, "size": len(content)})
+    try:
+        await asyncio.to_thread(dest.write_bytes, content)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}")
+
+    create_job(str(dest), job_id=job_id)
+
+    return JSONResponse({"job_id": job_id, "filename": safe_name, "size": len(content)})

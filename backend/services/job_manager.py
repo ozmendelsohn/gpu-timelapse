@@ -1,5 +1,5 @@
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 JobStatus = Literal["pending", "processing", "done", "error"]
@@ -18,8 +18,9 @@ class JobState:
 _jobs: dict[str, JobState] = {}
 
 
-def create_job(input_path: str) -> str:
-    job_id = str(uuid.uuid4())
+def create_job(input_path: str, job_id: str | None = None) -> str:
+    if job_id is None:
+        job_id = str(uuid.uuid4())
     _jobs[job_id] = JobState(job_id=job_id, input_path=input_path)
     return job_id
 
@@ -30,6 +31,7 @@ def get_job(job_id: str) -> JobState | None:
 
 def update_job(job_id: str, **kwargs) -> None:
     job = _jobs.get(job_id)
-    if job:
-        for k, v in kwargs.items():
-            setattr(job, k, v)
+    if job is None:
+        return
+    for k, v in kwargs.items():
+        setattr(job, k, v)

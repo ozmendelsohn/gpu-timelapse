@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { getJobStatus, JobStatusResponse } from "../api/client";
 
 interface Props {
@@ -7,7 +7,7 @@ interface Props {
 }
 
 export default function ProcessingStatus({ jobId, onComplete }: Props) {
-  const statusRef = useRef<JobStatusResponse | null>(null);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -15,13 +15,14 @@ export default function ProcessingStatus({ jobId, onComplete }: Props) {
       while (active) {
         try {
           const status = await getJobStatus(jobId);
-          statusRef.current = status;
+          if (!active) return; // unmounted while request was in-flight — bail before any state update
+          setProgress(status.progress);
           if (status.status === "done" || status.status === "error") {
             onComplete(status);
             return;
           }
         } catch {
-          // keep polling on transient errors
+          // keep polling on transient network errors
         }
         await new Promise((r) => setTimeout(r, 2000));
       }
@@ -29,8 +30,6 @@ export default function ProcessingStatus({ jobId, onComplete }: Props) {
     poll();
     return () => { active = false; };
   }, [jobId, onComplete]);
-
-  const progress = statusRef.current?.progress ?? 0;
 
   return (
     <div className="bg-gray-900 rounded-xl p-6 flex flex-col gap-4">

@@ -25,9 +25,11 @@ async def download_output(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != "done":
         raise HTTPException(status_code=400, detail="Job not complete")
+    if not job.output_path:
+        raise HTTPException(status_code=404, detail="Output file not found")
 
     path = Path(job.output_path)
-    if not path.exists():
+    if not path.is_file():  # is_file() rejects directories and non-existent paths
         raise HTTPException(status_code=404, detail="Output file not found")
 
     media_type = MIME_MAP.get(path.suffix, "application/octet-stream")

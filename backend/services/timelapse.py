@@ -8,6 +8,8 @@ from .job_manager import update_job
 
 OutputFormat = Literal["mp4", "gif", "webm"]
 
+MAX_MULTIPLIER = 1000.0
+
 
 def _get_duration(input_path: str) -> float:
     result = subprocess.run(
@@ -20,6 +22,9 @@ def _get_duration(input_path: str) -> float:
         capture_output=True,
         text=True,
     )
+    if result.returncode != 0 or not result.stdout.strip():
+        detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "no output"
+        raise RuntimeError(f"ffprobe could not read video duration: {detail}")
     return float(result.stdout.strip())
 
 
@@ -39,48 +44,65 @@ def _get_frame_count(input_path: str) -> int:
     try:
         return int(result.stdout.strip())
     except ValueError:
-        return 0
+        return 0  # progress bar will stay indeterminate if frame count is unavailable
 
 
-def _build_cmd(
+def _build_video_cmd(
     input_path: str,
     output_path: str,
     multiplier: float,
-    fmt: OutputFormat,
+    fmt: Literal["mp4", "webm"],
+    drop_audio: bool,
 ) -> list[str]:
     vf = f"setpts=PTS/{multiplier}"
-
-    if fmt == "gif":
-        palette_path = output_path.replace(".gif", "_palette.png")
-        pass1 = [
-            "ffmpeg", "-y", "-i", input_path,
-            "-vf", f"{vf},fps=15,scale=640:-1:flags=lanczos,palettegen",
-            palette_path,
-        ]
-        pass2 = [
-            "ffmpeg", "-y", "-i", input_path, "-i", palette_path,
-            "-lavfi", f"{vf},fps=15,scale=640:-1:flags=lanczos[x];[x][1:v]paletteuse",
-            "-an", output_path,
-        ]
-        return (pass1, pass2)
 
     if fmt == "mp4":
         codec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
     else:  # webm — VP9, CPU fallback (NVENC doesn't support VP9)
         codec_args = ["-c:v", "libvpx-vp9", "-crf", "33", "-b:v", "0"]
 
+    audio_args = ["-an"] if drop_audio else ["-af", f"atempo={min(multiplier, 2.0)}"]
+
     return [
         "ffmpeg", "-y",
         "-hwaccel", "cuda",
         "-i", input_path,
         "-vf", vf,
-        "-af", f"atempo={min(multiplier, 2.0)}",  # audio: capped at 2x; high-speed drops audio in caller
+        *audio_args,
         *codec_args,
         output_path,
     ]
 
 
-def _run_with_progress(cmd: list[str], job_id: str, total_frames: int, offset: float = 0.0, weight: float = 1.0):
+def _build_gif_cmds(
+    input_path: str,
+    output_path: str,
+    multiplier: float,
+) -> tuple[list[str], list[str], Path]:
+    vf = f"setpts=PTS/{multiplier}"
+    p = Path(output_path)
+    palette_path = p.parent / (p.stem + "_palette.png")
+
+    pass1 = [
+        "ffmpeg", "-y", "-i", input_path,
+        "-vf", f"{vf},fps=15,scale=640:-1:flags=lanczos,palettegen",
+        str(palette_path),
+    ]
+    pass2 = [
+        "ffmpeg", "-y", "-i", input_path, "-i", str(palette_path),
+        "-lavfi", f"{vf},fps=15,scale=640:-1:flags=lanczos[x];[x][1:v]paletteuse",
+        "-an", output_path,
+    ]
+    return pass1, pass2, palette_path
+
+
+def _run_with_progress(
+    cmd: list[str],
+    job_id: str,
+    total_frames: int,
+    offset: float = 0.0,
+    weight: float = 1.0,
+) -> int:
     proc = subprocess.Popen(
         cmd,
         stderr=subprocess.PIPE,
@@ -107,29 +129,29 @@ def process_timelapse(
 ) -> None:
     def _run():
         try:
-            update_job(job_id, status="processing", progress=0)
-
             duration = _get_duration(input_path)
             multiplier = value if mode == "multiplier" else duration / max(value, 0.1)
             multiplier = max(multiplier, 1.0)
 
+            if multiplier > MAX_MULTIPLIER:
+                raise ValueError(
+                    f"Computed speed {multiplier:.1f}× exceeds maximum {MAX_MULTIPLIER}×"
+                )
+
             total_frames = _get_frame_count(input_path)
 
-            cmd = _build_cmd(input_path, output_path, multiplier, fmt)
-
             if fmt == "gif":
-                pass1, pass2 = cmd
-                rc = _run_with_progress(pass1, job_id, total_frames, offset=0.0, weight=0.4)
-                if rc != 0:
-                    raise RuntimeError("Palette generation failed")
-                rc = _run_with_progress(pass2, job_id, total_frames, offset=0.4, weight=0.6)
+                pass1, pass2, palette_path = _build_gif_cmds(input_path, output_path, multiplier)
+                try:
+                    rc = _run_with_progress(pass1, job_id, total_frames, offset=0.0, weight=0.4)
+                    if rc != 0:
+                        raise RuntimeError("Palette generation failed")
+                    rc = _run_with_progress(pass2, job_id, total_frames, offset=0.4, weight=0.6)
+                finally:
+                    palette_path.unlink(missing_ok=True)
             else:
-                if multiplier > 2.0:
-                    # Drop audio for high speeds — atempo only supports up to 2x per stage
-                    idx_af = cmd.index("-af") if "-af" in cmd else -1
-                    if idx_af != -1:
-                        cmd = cmd[:idx_af] + cmd[idx_af + 2:]
-                    cmd.extend(["-an"])
+                drop_audio = multiplier > 2.0
+                cmd = _build_video_cmd(input_path, output_path, multiplier, fmt, drop_audio)
                 rc = _run_with_progress(cmd, job_id, total_frames)
 
             if rc != 0:
