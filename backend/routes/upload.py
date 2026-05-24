@@ -9,15 +9,15 @@ router = APIRouter()
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-ALLOWED_TYPES = {"video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/x-matroska"}
+ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 
 
 @router.post("/upload")
 async def upload_video(file: UploadFile = File(...)):
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.filename}")
 
-    suffix = Path(file.filename).suffix or ".mp4"
     job_id = create_job("")  # create placeholder first to get id
 
     dest = UPLOAD_DIR / f"{job_id}{suffix}"
