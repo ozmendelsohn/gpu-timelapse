@@ -12,9 +12,6 @@ UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
-MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
-
-
 @router.post("/upload")
 async def upload_video(file: UploadFile = File(...)):
     safe_name = Path(file.filename or "").name  # strip any directory components
@@ -23,11 +20,6 @@ async def upload_video(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix or '(none)'}")
 
     content = await file.read()
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large (max {MAX_UPLOAD_BYTES // 1024 // 1024} MB)",
-        )
 
     # Generate the ID and write the file BEFORE registering the job so a disk
     # failure never leaves an orphaned job record with an empty input_path.

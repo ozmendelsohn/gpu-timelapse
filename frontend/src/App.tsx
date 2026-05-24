@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import VideoUploader from "./components/VideoUploader";
 import TimelapseSetting from "./components/TimelapseSetting";
 import ProcessingStatus from "./components/ProcessingStatus";
@@ -18,6 +18,15 @@ export default function App() {
   const [uploadRes, setUploadRes] = useState<UploadResponse | null>(null);
   const [chosenFormat, setChosenFormat] = useState<OutputFormat>("mp4");
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Dev-only test hook — lets browser_evaluate inject an already-uploaded job
+  useEffect(() => {
+    (window as any).__testInject = (jobId: string, filename = "test.mp4", stage: Stage = "configure") => {
+      setUploadRes({ job_id: jobId, filename, size: 0 });
+      setStage(stage);
+    };
+    return () => { delete (window as any).__testInject; };
+  }, []);
 
   function handleUploaded(res: UploadResponse) {
     setUploadRes(res);

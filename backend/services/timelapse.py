@@ -57,9 +57,10 @@ def _build_video_cmd(
     vf = f"setpts=PTS/{multiplier}"
 
     if fmt == "mp4":
-        codec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
+        # -pix_fmt yuv420p forces 8-bit — required for h264_nvenc which doesn't support 10-bit input
+        codec_args = ["-pix_fmt", "yuv420p", "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
     else:  # webm — VP9, CPU fallback (NVENC doesn't support VP9)
-        codec_args = ["-c:v", "libvpx-vp9", "-crf", "33", "-b:v", "0"]
+        codec_args = ["-pix_fmt", "yuv420p", "-c:v", "libvpx-vp9", "-crf", "33", "-b:v", "0"]
 
     audio_args = ["-an"] if drop_audio else ["-af", f"atempo={min(multiplier, 2.0)}"]
 
