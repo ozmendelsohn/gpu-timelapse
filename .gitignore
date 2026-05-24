@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# uv
+.python-version
+
+# Uploads / outputs (user data)
+backend/uploads/
+backend/outputs/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.bun/
+
+# Env
+.env
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
